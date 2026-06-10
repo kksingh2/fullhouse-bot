@@ -1,0 +1,57 @@
+# Fullhouse 2026 single-bot config. ALL tunable parameters live here.
+# Day 2 patch = edit values, do NOT touch code.
+mode: "qualify"   # qualify | bracket | bracket_underdog
+
+timing:
+  hard_deadline_ms: 1500   # engine limit is 2000; leave 500ms buffer
+  mc_budget_flop: 600
+  mc_budget_turn: 500
+  mc_budget_river: 400
+
+preflop:
+  open_size_bb: 2.5
+  threebet_size_xpot: 3.0
+  fourbet_size_xpot: 2.3
+  threebet_bluff_freq: 0.05         # bracket: 0.08
+  squeeze_freq: 0.10                # bracket: 0.13
+  push_fold_threshold_bb: 15
+
+postflop:
+  cbet_freq_dry: 0.70               # bracket: 0.78
+  cbet_freq_wet: 0.45
+  cbet_size_dry_xpot: 0.33
+  cbet_size_wet_xpot: 0.66
+  turn_barrel_freq: 0.55
+  river_value_threshold_equity: 0.62
+  river_bluff_freq: 0.18
+
+sizing:
+  max_bet_size_pot: 1.00            # bracket: 1.50
+  overbet_river_polar: false        # bracket: true
+
+stack_off:
+  allin_threshold_equity: 0.80      # bracket: 0.72
+  spr_call_3bet_pot: 4.0
+
+defense:
+  mdf_buffer: 0.05                  # bracket: 0.02
+
+opponent_model:
+  beta_prior_a: 2.0
+  beta_prior_b: 5.0
+
+exploit:
+  enabled: true
+  min_hands_per_villain: 30         # bracket: 15
+  deviation_cap_pp: 15              # bracket: 25
+  fold_to_3bet_above: 0.65
+  fold_to_cbet_above: 0.60
+  cbet_freq_above: 0.85
+  wtsd_below: 0.20
+  rfi_below: 0.18
+
+mixing:
+  jitter_close_decisions: 0.20
+
+logging:
+  log_every_decision: true
