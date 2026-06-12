@@ -1,39 +1,3 @@
-"""Fullhouse Hackathon 2026 - single-file, sandbox-safe poker bot.
-
-Engine calls decide(game_state: dict) -> dict, once per action, 2s deadline.
-Auto-folds on crash or timeout; bot stays in the tournament.
-
-SCHEMA (authoritative, from uzlez/fullhouse-engine engine/game.py::_build_state):
-  type                 "action_request" | "warmup" | "hand_complete"
-  hand_id              str  (e.g. "local_ab12_h0007")  -- NOT an int
-  street               "preflop"|"flop"|"turn"|"river"
-  seat_to_act          int  -- THIS IS MY SEAT
-  pot                  int
-  community_cards      list[str]
-  current_bet          int  -- highest total bet this street
-  min_raise_to         int  -- minimum legal raise TOTAL
-  amount_owed          int  -- chips to call (0 => can check)
-  can_check            bool
-  your_cards           list[str]
-  your_stack           int  -- chips behind (already-bet chips are NOT here)
-  your_bet_this_street int
-  players              list[{seat,bot_id,stack,state,is_folded,is_all_in,
-                             bet_this_street,hole_cards}]
-  action_log           list[{seat,action,amount}]  -- THIS HAND ONLY; resets each
-                       hand; includes "small_blind"/"big_blind" entries
-  match_action_log     list[{hand_num,seat,bot_id,action,amount}]  -- cross-hand,
-                       rolling (<=200), present only via match.py (not validator).
-                       Keyed by bot_id (stable; seats are re-indexed per hand).
-
-CONSTANTS: SMALL_BLIND=50, BIG_BLIND=100, STARTING_STACK=10000.
-A raise whose chips-needed >= your_stack is converted to all_in by the engine,
-so the maximum legal raise TOTAL is your_stack + your_bet_this_street.
-
-SANDBOX: Python 3.10. Pre-installed: eval7, numpy, scipy, treys, scikit-learn.
-No pyyaml. Banned (validator AST-rejects): socket/urllib/requests/http, subprocess,
-multiprocessing, threading, asyncio, pickle, shelve, ctypes, runpy, importlib,
-and calls __import__/eval/exec/compile/os.system/os.popen/... . NONE used here.
-"""
 import sys
 import json
 import time
@@ -42,21 +6,16 @@ import traceback
 from types import SimpleNamespace
 
 try:
-    import eval7  # type: ignore
+    import eval7
     _HAS_EVAL7 = True
 except Exception:
     _HAS_EVAL7 = False
 
-# The match runner spawns us with stderr=PIPE and never drains it during a
-# match. A full OS pipe buffer (~64KB on Linux) makes the next write() BLOCK,
-# which would hang decide() into a 2s timeout -> auto-fold every remaining
-# hand. So we hard-cap total stderr bytes and stop writing well before that.
+# keep stderr small so we dont block on a full pipe
 _STDERR_BUDGET = 16 * 1024
 _stderr_written = 0
 
-
 def _safe_stderr(msg):
-    """Write to stderr at most until the byte budget is exhausted. Never raises."""
     global _stderr_written
     if _stderr_written >= _STDERR_BUDGET:
         return
@@ -70,10 +29,7 @@ def _safe_stderr(msg):
 
 BIG_BLIND_DEFAULT = 100
 
-
-# =============================================================================
 # CONFIG  (Day-2 patch: change MODE only, re-upload)
-# =============================================================================
 MODE = "qualify"   # "qualify" | "bracket" | "bracket_underdog"
 
 _BASE_CONFIG = {
@@ -105,14 +61,12 @@ _BASE_CONFIG = {
     "logging": {"log_every_decision": False},
 }
 
-
 def _ns(d):
     if isinstance(d, dict):
         return SimpleNamespace(**{k: _ns(v) for k, v in d.items()})
     if isinstance(d, list):
         return [_ns(x) for x in d]
     return d
-
 
 def _load_config():
     cfg = _ns(_BASE_CONFIG)
@@ -137,19 +91,13 @@ def _load_config():
         cfg.exploit.deviation_cap_pp = 35
     return cfg
 
-
 CONFIG = _load_config()
 
-
-# =============================================================================
 # HAND EVALUATION  (169-bucket LUT + eval7 Monte-Carlo)
-# =============================================================================
 RANKS = "23456789TJQKA"
 RANK_VAL = {r: i for i, r in enumerate(RANKS)}
 
-
 def hand_169(hole):
-    """Canonical bucket: ['Ah','Kd']->'AKo', ['As','Ks']->'AKs', ['7c','7h']->'77'."""
     if not hole or len(hole) != 2 or len(hole[0]) < 2 or len(hole[1]) < 2:
         return None
     r1, s1 = hole[0][0], hole[0][1]
@@ -161,7 +109,6 @@ def hand_169(hole):
     if r1 == r2:
         return r1 + r2
     return r1 + r2 + ("s" if s1 == s2 else "o")
-
 
 # Heads-up equity vs a random hand (PokerStove values), used preflop and as a
 # fallback whenever eval7 is unavailable.
@@ -207,10 +154,8 @@ PREFLOP_EQUITY_VS_RANDOM = {
     "43o": 0.292, "42o": 0.280, "32o": 0.262,
 }
 
-
 def preflop_equity_vs_random(hole):
     return PREFLOP_EQUITY_VS_RANDOM.get(hand_169(hole), 0.40)
-
 
 # Made-hand category (postflop). Higher = stronger. Used as a hard gate so we
 # never stack off / value-raise on equity-vs-random alone (a betting opponent's
@@ -220,9 +165,7 @@ HAND_RANK = {
     "Flush": 5, "Full House": 6, "Quads": 7, "Straight Flush": 8,
 }
 
-
 def made_hand_rank(hole, board):
-    """0=high card .. 8=straight flush. -1 if eval7 unavailable / bad input."""
     if not _HAS_EVAL7 or len(board) < 3 or len(hole) != 2:
         return -1
     try:
@@ -231,9 +174,7 @@ def made_hand_rank(hole, board):
     except Exception:
         return -1
 
-
 def equity_montecarlo(hole, board, n_villains, trials, deadline_s):
-    """eval7 Monte-Carlo equity vs n_villains random hands. LUT fallback."""
     if not _HAS_EVAL7 or n_villains < 1:
         base = preflop_equity_vs_random(hole)
         return base ** max(n_villains, 1)
@@ -271,10 +212,7 @@ def equity_montecarlo(hole, board, n_villains, trials, deadline_s):
     except Exception:
         return preflop_equity_vs_random(hole)
 
-
-# =============================================================================
 # PREFLOP RANGES (6-max, encoded as 169-bucket sets)
-# =============================================================================
 def _expand(spec):
     out = set()
     spec = spec.strip()
@@ -300,13 +238,11 @@ def _expand(spec):
     out.add(spec)
     return out
 
-
 def _build(*specs):
     out = set()
     for s in specs:
         out |= _expand(s)
     return out
-
 
 RFI = {
     "UTG": _build("22+", "ATs+", "KTs+", "QTs+", "JTs", "T9s", "98s", "AJo+", "KQo"),
@@ -327,7 +263,6 @@ PUSH_RANGES = {
     6:  _build("22+", "A2s+", "A2o+", "K2s+", "K7o+", "Q5s+", "Q9o+", "J7s+", "J9o+", "T7s+", "97s+", "87s", "76s"),
 }
 
-
 def push_range(bb):
     chosen = PUSH_RANGES[12]
     for thr in sorted(PUSH_RANGES):
@@ -335,12 +270,8 @@ def push_range(bb):
             return PUSH_RANGES[thr]
     return chosen
 
-
-# =============================================================================
 # BOARD TEXTURE
-# =============================================================================
 def board_wetness(community):
-    """0 (dry) .. 1 (wet). Handles short or odd inputs."""
     if not community or len(community) < 3:
         return 0.0
     try:
@@ -373,16 +304,12 @@ def board_wetness(community):
         wet -= 0.10
     return max(0.0, min(1.0, wet))
 
-
-# =============================================================================
 # STATE  (parse the engine dict into a thin typed view)
-# =============================================================================
 def _int(v, default=0):
     try:
         return int(v)
     except (TypeError, ValueError):
         return default
-
 
 class State(object):
     def __init__(self, raw):
@@ -435,7 +362,6 @@ class State(object):
 
     @property
     def position(self):
-        """6-max label by offset from the button. 'UNK' if blinds not in log."""
         n = self.n_seats
         sb = bb = None
         for e in self.action_log:
@@ -463,12 +389,8 @@ class State(object):
             return "UNK"
         return names[offset]
 
-
-# =============================================================================
 # OPPONENT MODEL  (stateless: derived from match_action_log keyed by bot_id)
-# =============================================================================
 def build_opponent_stats(match_log):
-    """Return {bot_id: {'hands','vpip','pfr','aff'}} from the rolling match log."""
     stats = {}
     hands_seen = {}
     for e in match_log:
@@ -505,7 +427,6 @@ def build_opponent_stats(match_log):
         }
     return out
 
-
 def classify(st):
     if st["hands"] < 8:
         return "unknown"
@@ -520,9 +441,7 @@ def classify(st):
         return "lag"
     return "reg"
 
-
 def last_aggressor_bot_id(s):
-    """bot_id of the most recent raiser/bettor this hand (an opponent)."""
     seat_to_bid = {}
     for p in s.players:
         if isinstance(p, dict):
@@ -536,19 +455,14 @@ def last_aggressor_bot_id(s):
                 return seat_to_bid.get(seat)
     return None
 
-
-# =============================================================================
 # STRATEGY
-# =============================================================================
 def _raise_to(s, target):
-    """Clamp a desired TOTAL bet to a legal raise, escalating to all_in at cap."""
     target = int(target)
     floor = s.min_raise_to if s.min_raise_to > 0 else (s.current_bet + s.big_blind)
     target = max(target, floor)
     if target >= s.max_raise_to:
         return {"action": "all_in"}
     return {"action": "raise", "amount": target}
-
 
 def decide_preflop(s, cfg):
     bucket = hand_169(s.my_cards)
@@ -604,7 +518,6 @@ def decide_preflop(s, cfg):
     if s.can_check:
         return {"action": "check"}
     return {"action": "fold"}
-
 
 def decide_postflop(s, cfg, deadline_s):
     budget = {"flop": cfg.timing.mc_flop, "turn": cfg.timing.mc_turn,
@@ -666,7 +579,6 @@ def decide_postflop(s, cfg, deadline_s):
             return _raise_to(s, target)
     return {"action": "check"} if s.can_check else {"action": "fold"}
 
-
 def exploit_adjust(action, s, cfg, opp_stats):
     if not cfg.exploit.enabled or not opp_stats:
         return action
@@ -692,10 +604,7 @@ def exploit_adjust(action, s, cfg, opp_stats):
             return {"action": "check"}
     return action
 
-
-# =============================================================================
 # SAFETY  (snap any action to a legal, well-formed one - never fold for free)
-# =============================================================================
 def coerce(action, s):
     if not isinstance(action, dict):
         return {"action": "check"} if s.can_check else {"action": "fold"}
@@ -725,10 +634,7 @@ def coerce(action, s):
         return {"action": "check"} if s.can_check else {"action": "fold"}
     return {"action": "check"} if s.can_check else {"action": "fold"}
 
-
-# =============================================================================
 # ENTRY POINT
-# =============================================================================
 def decide(game_state):
     t0 = time.perf_counter()
     # Warm-up ping (engine discards the reply); also handles non-action requests.
