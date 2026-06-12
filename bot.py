@@ -1,4 +1,4 @@
-"""Fullhouse Hackathon 2026 — single-file, sandbox-safe poker bot.
+"""Fullhouse Hackathon 2026 - single-file, sandbox-safe poker bot.
 
 Engine calls decide(game_state: dict) -> dict, once per action, 2s deadline.
 Auto-folds on crash or timeout; bot stays in the tournament.
@@ -214,7 +214,7 @@ def preflop_equity_vs_random(hole):
 
 # Made-hand category (postflop). Higher = stronger. Used as a hard gate so we
 # never stack off / value-raise on equity-vs-random alone (a betting opponent's
-# range is NOT random — ace-high looks great vs random and terrible vs a raiser).
+# range is NOT random - ace-high looks great vs random and terrible vs a raiser).
 HAND_RANK = {
     "High Card": 0, "Pair": 1, "Two Pair": 2, "Trips": 3, "Straight": 4,
     "Flush": 5, "Full House": 6, "Quads": 7, "Straight Flush": 8,
@@ -340,7 +340,7 @@ def push_range(bb):
 # BOARD TEXTURE
 # =============================================================================
 def board_wetness(community):
-    """0 (dry) .. 1 (wet). Robust to short/odd inputs."""
+    """0 (dry) .. 1 (wet). Handles short or odd inputs."""
     if not community or len(community) < 3:
         return 0.0
     try:
@@ -580,7 +580,7 @@ def decide_preflop(s, cfg):
 
         # CRITICAL FIX: getting all-in preflop with AQs/KQs/AK-light/pairs is a
         # coinflip, and each lost flip is a -10k bust that tanks the average.
-        # Non-premiums NEVER stack off preflop — they fold to a big re-raise.
+        # Non-premiums NEVER stack off preflop - they fold to a big re-raise.
         if big_price:
             return {"action": "fold"}
 
@@ -617,7 +617,7 @@ def decide_postflop(s, cfg, deadline_s):
         big_bet = s.amount_owed >= s.my_stack * 0.4
         need = s.amount_owed / max(s.pot + s.amount_owed, 1)
         # CRITICAL: equity_montecarlo is vs RANDOM hands, but a villain who is
-        # BETTING has a much stronger range — and multiway, someone almost
+        # BETTING has a much stronger range - and multiway, someone almost
         # always has it. Discount raw equity before trusting it to call:
         #   - a flat penalty for facing aggression (range > random)
         #   - an extra penalty per additional villain (compounding)
@@ -694,7 +694,7 @@ def exploit_adjust(action, s, cfg, opp_stats):
 
 
 # =============================================================================
-# SAFETY  (snap any action to a legal, well-formed one — never fold for free)
+# SAFETY  (snap any action to a legal, well-formed one - never fold for free)
 # =============================================================================
 def coerce(action, s):
     if not isinstance(action, dict):
